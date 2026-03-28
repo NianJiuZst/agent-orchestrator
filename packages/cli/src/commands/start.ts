@@ -50,10 +50,20 @@ import {
 } from "../lib/web-dir.js";
 import { rebuildDashboardProductionArtifacts } from "../lib/dashboard-rebuild.js";
 import { preflight } from "../lib/preflight.js";
-import { register, unregister, isAlreadyRunning, getRunning, waitForExit } from "../lib/running-state.js";
+import {
+  register,
+  unregister,
+  isAlreadyRunning,
+  getRunning,
+  waitForExit,
+} from "../lib/running-state.js";
 import { isHumanCaller } from "../lib/caller-context.js";
 import { detectEnvironment } from "../lib/detect-env.js";
-import { detectAgentRuntime, detectAvailableAgents, type DetectedAgent } from "../lib/detect-agent.js";
+import {
+  detectAgentRuntime,
+  detectAvailableAgents,
+  type DetectedAgent,
+} from "../lib/detect-agent.js";
 import { detectDefaultBranch } from "../lib/git-utils.js";
 import { promptConfirm, promptSelect } from "../lib/prompts.js";
 import {
@@ -65,6 +75,13 @@ import { formatCommandError } from "../lib/cli-errors.js";
 import { detectOpenClawInstallation } from "../lib/openclaw-probe.js";
 import { applyOpenClawCredentials } from "../lib/credential-resolver.js";
 import { findProjectForDirectory } from "../lib/project-resolution.js";
+import { formatAttachCommand } from "../lib/attach.js";
+import {
+  appendStringOption,
+  resolveRuntimeOverride,
+  type RuntimeOverride,
+  type RuntimeOverrideFlagOptions,
+} from "../lib/runtime-overrides.js";
 
 const DEFAULT_PORT = 3000;
 const IS_TTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -230,7 +247,11 @@ function gitInstallAttempts(): InstallAttempt[] {
   }
   if (process.platform === "linux") {
     return [
-      { cmd: "sudo", args: ["apt-get", "install", "-y", "git"], label: "sudo apt-get install -y git" },
+      {
+        cmd: "sudo",
+        args: ["apt-get", "install", "-y", "git"],
+        label: "sudo apt-get install -y git",
+      },
       { cmd: "sudo", args: ["dnf", "install", "-y", "git"], label: "sudo dnf install -y git" },
     ];
   }
@@ -249,10 +270,7 @@ function gitInstallAttempts(): InstallAttempt[] {
 function gitInstallHints(): string[] {
   if (process.platform === "darwin") return ["brew install git"];
   if (process.platform === "win32") return ["winget install --id Git.Git -e --source winget"];
-  return [
-    "sudo apt install git      # Debian/Ubuntu",
-    "sudo dnf install git      # Fedora/RHEL",
-  ];
+  return ["sudo apt install git      # Debian/Ubuntu", "sudo dnf install git      # Fedora/RHEL"];
 }
 
 function ghInstallAttempts(): InstallAttempt[] {
@@ -261,7 +279,11 @@ function ghInstallAttempts(): InstallAttempt[] {
   }
   if (process.platform === "linux") {
     return [
-      { cmd: "sudo", args: ["apt-get", "install", "-y", "gh"], label: "sudo apt-get install -y gh" },
+      {
+        cmd: "sudo",
+        args: ["apt-get", "install", "-y", "gh"],
+        label: "sudo apt-get install -y gh",
+      },
       { cmd: "sudo", args: ["dnf", "install", "-y", "gh"], label: "sudo dnf install -y gh" },
     ];
   }
@@ -616,7 +638,9 @@ async function autoCreateConfig(workingDir: string): Promise<OrchestratorConfig>
     console.log(chalk.yellow("⚠ tmux not found — will prompt to install at startup"));
   }
   if (!env.hasGh) {
-    console.log(chalk.yellow("⚠ GitHub CLI (gh) not found — optional, but recommended for GitHub workflows."));
+    console.log(
+      chalk.yellow("⚠ GitHub CLI (gh) not found — optional, but recommended for GitHub workflows."),
+    );
     const shouldInstallGh = await askYesNo("Install GitHub CLI now?", false);
     if (shouldInstallGh) {
       const installedGh = await tryInstallWithAttempts(
@@ -657,7 +681,9 @@ async function addProjectToConfig(
     let i = 2;
     while (config.projects[`${projectId}-${i}`]) i++;
     const newId = `${projectId}-${i}`;
-    console.log(chalk.yellow(`  ⚠ Project "${projectId}" already exists — using "${newId}" instead.`));
+    console.log(
+      chalk.yellow(`  ⚠ Project "${projectId}" already exists — using "${newId}" instead.`),
+    );
     projectId = newId;
   }
 
@@ -822,7 +848,11 @@ function tmuxInstallAttempts(): InstallAttempt[] {
   }
   if (process.platform === "linux") {
     return [
-      { cmd: "sudo", args: ["apt-get", "install", "-y", "tmux"], label: "sudo apt-get install -y tmux" },
+      {
+        cmd: "sudo",
+        args: ["apt-get", "install", "-y", "tmux"],
+        label: "sudo apt-get install -y tmux",
+      },
       { cmd: "sudo", args: ["dnf", "install", "-y", "tmux"], label: "sudo dnf install -y tmux" },
     ];
   }
@@ -831,21 +861,16 @@ function tmuxInstallAttempts(): InstallAttempt[] {
 
 function tmuxInstallHints(): string[] {
   if (process.platform === "darwin") return ["brew install tmux"];
-  if (process.platform === "win32") return [
-    "# Install WSL first, then inside WSL:",
-    "sudo apt install tmux",
-  ];
-  return [
-    "sudo apt install tmux      # Debian/Ubuntu",
-    "sudo dnf install tmux      # Fedora/RHEL",
-  ];
+  if (process.platform === "win32")
+    return ["# Install WSL first, then inside WSL:", "sudo apt install tmux"];
+  return ["sudo apt install tmux      # Debian/Ubuntu", "sudo dnf install tmux      # Fedora/RHEL"];
 }
 
 async function ensureTmux(): Promise<void> {
   const hasTmux = (await execSilent("tmux", ["-V"])) !== null;
   if (hasTmux) return;
 
-  console.log(chalk.yellow("⚠ tmux is required for runtime \"tmux\"."));
+  console.log(chalk.yellow('⚠ tmux is required for runtime "tmux".'));
   const shouldInstall = await askYesNo("Install tmux now?", true, false);
   if (shouldInstall) {
     const installed = await tryInstallWithAttempts(
@@ -912,13 +937,27 @@ async function runStartup(
   config: OrchestratorConfig,
   projectId: string,
   project: ProjectConfig,
-  opts?: { dashboard?: boolean; orchestrator?: boolean; rebuild?: boolean; dev?: boolean },
+  opts?: RuntimeOverrideFlagOptions & {
+    dashboard?: boolean;
+    orchestrator?: boolean;
+    rebuild?: boolean;
+    dev?: boolean;
+  },
 ): Promise<number> {
-  // Ensure tmux is available before doing anything — covers all entry paths
-  // (normal start, URL start, retry with existing config)
-  const runtime = config.defaults?.runtime ?? "tmux";
-  if (runtime === "tmux") {
-    await ensureTmux();
+  const runtimeOverride = resolveRuntimeOverride(config, project, opts ?? {});
+
+  // Only require runtime dependencies when we are actually starting the orchestrator.
+  if (opts?.orchestrator !== false) {
+    if (runtimeOverride.effectiveRuntime === "tmux") {
+      await ensureTmux();
+    } else if (runtimeOverride.effectiveRuntime === "docker") {
+      await preflight.checkDocker(runtimeOverride.effectiveRuntimeConfig);
+    } else {
+      await preflight.checkRuntime(
+        runtimeOverride.effectiveRuntime,
+        runtimeOverride.effectiveRuntimeConfig,
+      );
+    }
   }
   await warnAboutOpenClawStatus(config);
 
@@ -1012,7 +1051,7 @@ async function runStartup(
   let tmuxTarget = sessionId;
   let hasExistingOrchestrators = false;
   let selectedOrchestratorId: string | null = null;
-
+  let attachCommand = `tmux attach -t ${tmuxTarget}`;
   if (opts?.orchestrator !== false) {
     const sm = await getSessionManager(config);
 
@@ -1052,6 +1091,8 @@ async function runStartup(
       selectedOrchestratorId = selected.id;
       // Use runtimeHandle.id if available, otherwise fall back to the session ID
       tmuxTarget = selected.runtimeHandle?.id ?? selected.id;
+      const attachInfo = await sm.getAttachInfo(selected.id).catch(() => null);
+      attachCommand = formatAttachCommand(attachInfo, `tmux attach -t ${tmuxTarget}`);
       if (opts?.dashboard !== false && existingOrchestrators.length > 1) {
         hasExistingOrchestrators = true;
       }
@@ -1065,11 +1106,18 @@ async function runStartup(
       try {
         spinner.start("Creating orchestrator session");
         const systemPrompt = generateOrchestratorPrompt({ config, projectId, project });
-        const session = await sm.spawnOrchestrator({ projectId, systemPrompt });
+        const session = await sm.spawnOrchestrator({
+          projectId,
+          systemPrompt,
+          ...(runtimeOverride.runtime ? { runtime: runtimeOverride.runtime } : {}),
+          ...(runtimeOverride.runtimeConfig ? { runtimeConfig: runtimeOverride.runtimeConfig } : {}),
+        });
         selectedOrchestratorId = session.id;
         if (session.runtimeHandle?.id) {
           tmuxTarget = session.runtimeHandle.id;
         }
+        const attachInfo = await sm.getAttachInfo(session.id).catch(() => null);
+        attachCommand = formatAttachCommand(attachInfo, `tmux attach -t ${tmuxTarget}`);
         reused =
           orchestratorSessionStrategy === "reuse" &&
           session.metadata?.["orchestratorSessionReused"] === "true";
@@ -1108,7 +1156,7 @@ async function runStartup(
       "multiple sessions found — select one in the dashboard",
     );
   } else if (opts?.orchestrator !== false && !reused) {
-    console.log(chalk.cyan("Orchestrator:"), `tmux attach -t ${tmuxTarget}`);
+    console.log(chalk.cyan("Orchestrator:"), attachCommand);
   } else if (reused) {
     console.log(chalk.cyan("Orchestrator:"), `reused existing session (${sessionId})`);
   }
@@ -1195,6 +1243,29 @@ export function registerStart(program: Command): void {
     .option("--rebuild", "Clean and rebuild dashboard before starting")
     .option("--dev", "Use Next.js dev server with hot reload (for dashboard UI development)")
     .option("--interactive", "Prompt to configure config settings")
+    .option(
+      "--runtime <name>",
+      "Override the runtime plugin for the orchestrator (e.g. tmux, docker)",
+    )
+    .option("--runtime-image <image>", "Override runtimeConfig.image for docker runtime")
+    .option("--runtime-config <json>", "Override runtimeConfig with a JSON object")
+    .option("--runtime-cpus <cpus>", "Override runtimeConfig.limits.cpus for docker runtime")
+    .option("--runtime-memory <memory>", "Override runtimeConfig.limits.memory for docker runtime")
+    .option("--runtime-gpus <gpus>", "Override runtimeConfig.limits.gpus for docker runtime")
+    .option("--runtime-read-only", "Set runtimeConfig.readOnlyRoot=true for docker runtime")
+    .option("--runtime-network <network>", "Override runtimeConfig.network for docker runtime")
+    .option(
+      "--runtime-cap-drop <cap>",
+      "Append a runtimeConfig.capDrop entry for docker runtime (repeatable)",
+      appendStringOption,
+      [],
+    )
+    .option(
+      "--runtime-tmpfs <mount>",
+      "Append a runtimeConfig.tmpfs entry for docker runtime (repeatable)",
+      appendStringOption,
+      [],
+    )
     .action(
       async (
         projectArg?: string,
@@ -1204,6 +1275,16 @@ export function registerStart(program: Command): void {
           rebuild?: boolean;
           dev?: boolean;
           interactive?: boolean;
+          runtime?: string;
+          runtimeConfig?: string;
+          runtimeImage?: string;
+          runtimeCpus?: string;
+          runtimeMemory?: string;
+          runtimeGpus?: string;
+          runtimeReadOnly?: boolean;
+          runtimeNetwork?: string;
+          runtimeCapDrop?: string[];
+          runtimeTmpfs?: string[];
         },
       ) => {
         try {
@@ -1246,7 +1327,8 @@ export function registerStart(program: Command): void {
 
               // Check if project is already in config (match by path)
               const existingEntry = Object.entries(config.projects).find(
-                ([, p]) => resolve(p.path.replace(/^~/, process.env["HOME"] || "")) === resolvedPath,
+                ([, p]) =>
+                  resolve(p.path.replace(/^~/, process.env["HOME"] || "")) === resolvedPath,
               );
 
               if (existingEntry) {
@@ -1309,9 +1391,9 @@ export function registerStart(program: Command): void {
 
                 // Collect existing prefixes to avoid collisions
                 const existingPrefixes = new Set(
-                  Object.values(rawConfig.projects as Record<string, Record<string, unknown>>).map(
-                    (p) => p.sessionPrefix as string,
-                  ).filter(Boolean),
+                  Object.values(rawConfig.projects as Record<string, Record<string, unknown>>)
+                    .map((p) => p.sessionPrefix as string)
+                    .filter(Boolean),
                 );
 
                 let newId: string;
@@ -1334,9 +1416,19 @@ export function registerStart(program: Command): void {
                 // Continue to startup below
               } else if (choice === "restart") {
                 try { process.kill(running.pid, "SIGTERM"); } catch { /* already dead */ }
+              } else if (choice === "restart") {
+                try {
+                  process.kill(running.pid, "SIGTERM");
+                } catch {
+                  /* already dead */
+                }
                 if (!(await waitForExit(running.pid, 5000))) {
                   console.log(chalk.yellow("  Process didn't exit cleanly, sending SIGKILL..."));
-                  try { process.kill(running.pid, "SIGKILL"); } catch { /* already dead */ }
+                  try {
+                    process.kill(running.pid, "SIGKILL");
+                  } catch {
+                    /* already dead */
+                  }
                 }
                 await unregister();
                 console.log(chalk.yellow("\n  Stopped existing instance. Restarting...\n"));
@@ -1426,9 +1518,7 @@ export function registerStop(program: Command): void {
                 // Already dead
               }
               await unregister();
-              console.log(
-                chalk.green(`\n✓ Stopped AO on port ${running.port}`),
-              );
+              console.log(chalk.green(`\n✓ Stopped AO on port ${running.port}`));
               console.log(chalk.dim(`  Projects: ${running.projects.join(", ")}\n`));
             } else {
               console.log(chalk.yellow("No running AO instance found in running.json."));
@@ -1476,12 +1566,8 @@ export function registerStop(program: Command): void {
           await stopDashboard(running?.port ?? port);
 
           console.log(chalk.bold.green("\n✓ Orchestrator stopped\n"));
-          console.log(
-            chalk.dim(`  Uptime: since ${running?.startedAt ?? "unknown"}`),
-          );
-          console.log(
-            chalk.dim(`  Projects: ${Object.keys(config.projects).join(", ")}\n`),
-          );
+          console.log(chalk.dim(`  Uptime: since ${running?.startedAt ?? "unknown"}`));
+          console.log(chalk.dim(`  Projects: ${Object.keys(config.projects).join(", ")}\n`));
         } catch (err) {
           if (err instanceof Error) {
             console.error(chalk.red("\nError:"), err.message);
