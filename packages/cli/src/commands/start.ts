@@ -79,8 +79,6 @@ import { formatAttachCommand } from "../lib/attach.js";
 import {
   appendStringOption,
   resolveRuntimeOverride,
-  type RuntimeOverride,
-  type RuntimeOverrideFlagOptions,
 } from "../lib/runtime-overrides.js";
 
 const DEFAULT_PORT = 3000;
@@ -1414,8 +1412,6 @@ export function registerStart(program: Command): void {
                 projectId = newId;
                 project = config.projects[newId];
                 // Continue to startup below
-              } else if (choice === "restart") {
-                try { process.kill(running.pid, "SIGTERM"); } catch { /* already dead */ }
               } else if (choice === "restart") {
                 try {
                   process.kill(running.pid, "SIGTERM");
