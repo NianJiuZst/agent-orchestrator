@@ -589,25 +589,25 @@ describe("scm-gitlab plugin", () => {
       expect(checks[0].status).toBe("failed");
     });
 
-    it("passes --hostname to glab api for self-hosted GitLab", async () => {
+    it("sets GITLAB_HOST env var for self-hosted GitLab", async () => {
       const selfHosted = create({ host: "gitlab.corp.com" });
       mockGlab([{ id: 100 }]);
       mockGlab([]);
       await selfHosted.getCIChecks(pr);
       const firstCallArgs = glabMock.mock.calls[0][1] as string[];
+      const firstCallEnv = glabMock.mock.calls[0][2] as { env: Record<string, string> };
       expect(firstCallArgs[0]).toBe("api");
-      expect(firstCallArgs[1]).toBe("--hostname");
-      expect(firstCallArgs[2]).toBe("gitlab.corp.com");
+      expect(firstCallEnv.env.GITLAB_HOST).toBe("gitlab.corp.com");
     });
 
-    it("strips hostname from project ID and infers --hostname from pr.owner", async () => {
+    it("strips hostname from project ID and infers GITLAB_HOST from pr.owner", async () => {
       const selfHostedPr = { ...pr, owner: "gitlab.corp.com/acme", repo: "repo" };
       mockGlab([{ id: 100 }]);
       mockGlab([]);
       await scm.getCIChecks(selfHostedPr);
       const firstCallArgs = glabMock.mock.calls[0][1] as string[];
-      expect(firstCallArgs).toContain("--hostname");
-      expect(firstCallArgs).toContain("gitlab.corp.com");
+      const firstCallEnv = glabMock.mock.calls[0][2] as { env: Record<string, string> };
+      expect(firstCallEnv.env.GITLAB_HOST).toBe("gitlab.corp.com");
       expect(firstCallArgs).toContain("projects/acme%2Frepo/merge_requests/42/pipelines");
     });
 
@@ -617,7 +617,8 @@ describe("scm-gitlab plugin", () => {
       mockGlab([]);
       await scm.getCIChecks(dottedGroupPr);
       const firstCallArgs = glabMock.mock.calls[0][1] as string[];
-      expect(firstCallArgs).not.toContain("--hostname");
+      const firstCallEnv = glabMock.mock.calls[0][2] as { env: Record<string, string> };
+      expect(firstCallEnv.env.GITLAB_HOST).toBeUndefined();
       expect(firstCallArgs).toContain("projects/my.company%2Frepo/merge_requests/42/pipelines");
     });
   });
@@ -885,14 +886,14 @@ describe("scm-gitlab plugin", () => {
       expect(await scm.getReviewDecision(pr)).toBe("none");
     });
 
-    it("passes --hostname to glab api for self-hosted GitLab", async () => {
+    it("sets GITLAB_HOST env var for self-hosted GitLab", async () => {
       const selfHosted = create({ host: "gitlab.corp.com" });
       mockGlab({ approved: true, approvals_left: 0 });
       await selfHosted.getReviewDecision(pr);
       const args = glabMock.mock.calls[0][1] as string[];
+      const callEnv = glabMock.mock.calls[0][2] as { env: Record<string, string> };
       expect(args[0]).toBe("api");
-      expect(args[1]).toBe("--hostname");
-      expect(args[2]).toBe("gitlab.corp.com");
+      expect(callEnv.env.GITLAB_HOST).toBe("gitlab.corp.com");
     });
   });
 
